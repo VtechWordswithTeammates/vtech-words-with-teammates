@@ -6,7 +6,7 @@ import { ensureMonday, normalizeWord } from "@/lib/game";
 import { isAdminAuthed } from "@/lib/auth";
 
 const wordSchema = z.object({
-  weekStartDate: z.string().min(8), // expecting YYYY-MM-DD
+  weekStartDate: z.string().min(8),
   secretWord: z.string().min(2),
   clue1: z.string(),
   clue2: z.string(),
@@ -16,20 +16,9 @@ const wordSchema = z.object({
   isPublished: z.boolean().optional().default(false),
 });
 
-const schema = z.object({ items: z.array(wordSchema) });
-
-function toUtcDateOnly(isoDate: string): Date {
-  // Expect strict YYYY-MM-DD
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
-  if (!m) throw new Error("weekStartDate must be in YYYY-MM-DD format");
-
-  const year = Number(m[1]);
-  const month = Number(m[2]); // 1-12
-  const day = Number(m[3]);   // 1-31
-
-  // Store as UTC midnight so it's stable across timezones
-  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
-}
+const schema = z.object({
+  items: z.array(wordSchema),
+});
 
 export async function POST(req: Request) {
   if (!isAdminAuthed()) {
@@ -38,24 +27,14 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);
+
   if (!parsed.success) {
     return NextResponse.json({ message: "Invalid payload" }, { status: 400 });
   }
 
-  const records = parsed.data.items;
+  const prepared = [];
 
-  const prepared: {
-    weekStartDate: Date;
-    secretWord: string;
-    clue1: string;
-    clue2: string;
-    clue3: string;
-    clue4: string;
-    clue5: string;
-    isPublished: boolean;
-  }[] = [];
-
-  for (const item of records) {
+  for (const item of parsed.data.items) {
     try {
       ensureMonday(item.weekStartDate);
     } catch (err) {
@@ -79,16 +58,27 @@ export async function POST(req: Request) {
       );
     }
 
-    const clueList = [item.clue1, item.clue2, item.clue3, item.clue4, item.clue5];
-    if (clueList.some((c) => containsProfanity(c))) {
+    const clues = [
+      item.clue1,
+      item.clue2,
+      item.clue3,
+      item.clue4,
+      item.clue5,
+    ];
+
+    if (clues.some((c) => containsProfanity(c))) {
       return NextResponse.json(
         { message: `Clues for ${item.weekStartDate} contain profanity` },
         { status: 400 }
       );
     }
 
+    // ✅ Native Date — no Luxon, no TZ issues
+    const weekStart = new Date(item.weekStartDate);
+    weekStart.setHours(0, 0, 0, 0);
+
     prepared.push({
-      weekStartDate: toUtcDateOnly(item.weekStartDate),
+      weekStartDate: weekStart,
       secretWord: normalizeWord(item.secretWord),
       clue1: item.clue1,
       clue2: item.clue2,
@@ -107,5 +97,7 @@ export async function POST(req: Request) {
     });
   }
 
-  return NextResponse.json({ message: `Imported ${prepared.length} week(s)` });
+  return NextResponse.json({
+    message: `Imported ${prepared.length} week(s)`,
+  });
 }

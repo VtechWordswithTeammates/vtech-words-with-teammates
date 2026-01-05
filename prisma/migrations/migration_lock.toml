@@ -1,0 +1,2 @@
+# This file ensures migrations run with the same provider they were generated for.
+provider = "sqlite"

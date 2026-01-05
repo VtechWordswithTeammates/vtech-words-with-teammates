@@ -41,5 +41,6 @@
     "tailwindcss": "^3.4.14",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3"
+    "@types/luxon": "^3.4.2"
   }
 }

@@ -1,0 +1,60 @@
+// Prisma schema for Vtech Words with Teammates
+// Local development uses SQLite; production should point DATABASE_URL to PostgreSQL (e.g., Supabase)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = env("DATABASE_PROVIDER")
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String    @id @default(cuid())
+  displayName String
+  createdAt   DateTime  @default(now())
+  sessions    Session[]
+  guesses     Guess[]
+
+  @@unique([displayName])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model WeekWord {
+  id            String   @id @default(cuid())
+  weekStartDate DateTime  @unique
+  secretWord    String
+  clue1         String
+  clue2         String
+  clue3         String
+  clue4         String
+  clue5         String
+  isPublished   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  guesses       Guess[]
+}
+
+model Guess {
+  id            String   @id @default(cuid())
+  guess         String
+  isCorrect     Boolean  @default(false)
+  pointsAwarded Int      @default(0)
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+  weekWord      WeekWord @relation(fields: [weekWordId], references: [id], onDelete: Cascade)
+  weekWordId    String
+
+  @@index([userId, weekWordId])
+  @@index([weekWordId])
+}

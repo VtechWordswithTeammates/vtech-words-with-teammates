@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { DateTime } from "luxon";
 import { prisma } from "@/lib/prisma";
 import { containsProfanity } from "@/lib/profanity";
-import { getSession } from "@/lib/auth";
-import { POINTS_BY_DAY, normalizeWord } from "@/lib/game";
-import { dayRange, getWeekStart, nowInTz } from "@/lib/time";
+import { ensureMonday, normalizeWord } from "@/lib/game";
+import { TZ } from "@/lib/time";
+import { isAdminAuthed } from "@/lib/auth";
 
 const schema = z.object({
   guess: z.string().min(1).max(40)

@@ -3,81 +3,33 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { containsProfanity } from "@/lib/profanity";
 import { ensureMonday, normalizeWord } from "@/lib/game";
-import { TZ } from "@/lib/time";
 import { isAdminAuthed } from "@/lib/auth";
 
-/**
- * Convert YYYY-MM-DD (or ISO date string) to a JS Date that represents
- * the start of that day (00:00:00) in the given IANA timezone (TZ).
- *
- * This avoids Luxon entirely, but still respects timezones + DST.
- */
-function startOfDayInTimeZone(dateStr: string, timeZone: string): Date {
-  // Accept "YYYY-MM-DD" and also ISO strings like "YYYY-MM-DDTHH:mm:ssZ"
-  const ymd = dateStr.slice(0, 10);
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
-  if (!match) throw new Error(`Invalid date format: ${dateStr}`);
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-
-  // This is "local midnight" expressed as if it were UTC (a reference point).
-  const localMidnightAsUTC = Date.UTC(year, month - 1, day, 0, 0, 0);
-
-  const getOffsetMinutes = (utcMillis: number) => {
-    const dtf = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false
-    });
-
-    const parts = dtf.formatToParts(new Date(utcMillis));
-    const map: Record<string, string> = {};
-    for (const p of parts) {
-      if (p.type !== "literal") map[p.type] = p.value;
-    }
-
-    const asUTC = Date.UTC(
-      Number(map.year),
-      Number(map.month) - 1,
-      Number(map.day),
-      Number(map.hour),
-      Number(map.minute),
-      Number(map.second)
-    );
-
-    // Offset in minutes between TZ-local time and UTC at this instant
-    return (asUTC - utcMillis) / 60000;
-  };
-
-  // Iteratively refine (handles DST boundaries correctly)
-  let utcMillis = localMidnightAsUTC;
-  for (let i = 0; i < 2; i++) {
-    const offsetMin = getOffsetMinutes(utcMillis);
-    utcMillis = localMidnightAsUTC - offsetMin * 60_000;
-  }
-
-  return new Date(utcMillis);
-}
-
 const wordSchema = z.object({
-  weekStartDate: z.string().min(8),
+  weekStartDate: z.string().min(8), // expecting YYYY-MM-DD
   secretWord: z.string().min(2),
   clue1: z.string(),
   clue2: z.string(),
   clue3: z.string(),
   clue4: z.string(),
   clue5: z.string(),
-  isPublished: z.boolean().optional().default(false)
+  isPublished: z.boolean().optional().default(false),
 });
 
 const schema = z.object({ items: z.array(wordSchema) });
+
+function toUtcDateOnly(isoDate: string): Date {
+  // Expect strict YYYY-MM-DD
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!m) throw new Error("weekStartDate must be in YYYY-MM-DD format");
+
+  const year = Number(m[1]);
+  const month = Number(m[2]); // 1-12
+  const day = Number(m[3]);   // 1-31
+
+  // Store as UTC midnight so it's stable across timezones
+  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+}
 
 export async function POST(req: Request) {
   if (!isAdminAuthed()) {
@@ -92,7 +44,7 @@ export async function POST(req: Request) {
 
   const records = parsed.data.items;
 
-  const prepared = [] as {
+  const prepared: {
     weekStartDate: Date;
     secretWord: string;
     clue1: string;
@@ -101,13 +53,16 @@ export async function POST(req: Request) {
     clue4: string;
     clue5: string;
     isPublished: boolean;
-  }[];
+  }[] = [];
 
   for (const item of records) {
     try {
       ensureMonday(item.weekStartDate);
     } catch (err) {
-      return NextResponse.json({ message: (err as Error).message }, { status: 400 });
+      return NextResponse.json(
+        { message: (err as Error).message },
+        { status: 400 }
+      );
     }
 
     if (item.secretWord.includes("-")) {
@@ -133,14 +88,14 @@ export async function POST(req: Request) {
     }
 
     prepared.push({
-      weekStartDate: startOfDayInTimeZone(item.weekStartDate, TZ),
+      weekStartDate: toUtcDateOnly(item.weekStartDate),
       secretWord: normalizeWord(item.secretWord),
       clue1: item.clue1,
       clue2: item.clue2,
       clue3: item.clue3,
       clue4: item.clue4,
       clue5: item.clue5,
-      isPublished: item.isPublished ?? false
+      isPublished: item.isPublished ?? false,
     });
   }
 
@@ -148,7 +103,7 @@ export async function POST(req: Request) {
     await prisma.weekWord.upsert({
       where: { weekStartDate: payload.weekStartDate },
       create: payload,
-      update: payload
+      update: payload,
     });
   }
 
